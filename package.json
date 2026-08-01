@@ -1,0 +1,19 @@
+{
+  "name": "oauth21-auth-server",
+  "version": "1.0.0",
+  "description": "OAuth 2.1 (draft) Authorization Server with PKCE, JWT, and refresh token rotation",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "generate-keys": "node scripts/generate-keys.js",
+    "init-db": "node scripts/init-db.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "crypto": "^1.0.1",
+    "express": "^4.19.2",
+    "jose": "^5.9.6",
+    "uuid": "^10.0.0"
+  }
+}

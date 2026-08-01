@@ -1,0 +1,7 @@
+node_modules/
+data/
+server.log
+keys/private.pem
+.env
+.DS_Store
+.trae/
