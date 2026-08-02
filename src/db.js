@@ -1,17 +1,22 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
-const config = require('./config');
 
 let db;
 
-function initDatabase() {
-  const dataDir = path.dirname(config.dbPath);
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+function initDatabase(dbPath) {
+  if (db) {
+    return db;
   }
 
-  db = new Database(config.dbPath);
+  if (dbPath && dbPath !== ':memory:') {
+    const dataDir = path.dirname(dbPath);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+  }
+
+  db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 
@@ -65,8 +70,15 @@ function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS token_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_type TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tokens_value ON tokens(token_value);
     CREATE INDEX IF NOT EXISTS idx_auth_codes_code ON authorization_codes(code);
+    CREATE INDEX IF NOT EXISTS idx_token_events_type_time ON token_events(event_type, created_at);
   `);
 
   try {
@@ -90,7 +102,7 @@ function initDatabase() {
 
 function getDb() {
   if (!db) {
-    initDatabase();
+    throw new Error('Database has not been initialized. Call initDatabase(dbPath) first.');
   }
   return db;
 }
