@@ -1,9 +1,16 @@
 const express = require('express');
 const url = require('url');
-const { getClientById, verifyUserPassword, getUserByUsername, createAuthorizationCode } = require('../data');
-const config = require('../config');
+const { getClientById, verifyUserPassword, getUserByUsername } = require('../data');
+const { issueAuthorizationCode } = require('../grantService');
 
 const router = express.Router();
+
+let config;
+
+// Receive the shared config object from the entry point (authorization code TTL).
+function configure(cfg) {
+  config = cfg;
+}
 
 const loginFormHtml = (client, redirectUri, scope, state, codeChallenge, codeChallengeMethod, errorMsg) => `
 <!DOCTYPE html>
@@ -313,7 +320,7 @@ router.post('/authorize/consent', express.urlencoded({ extended: true }), (req, 
     return redirectWithError(redirect_uri, 'server_error', 'User not found', state, res);
   }
 
-  const code = createAuthorizationCode(
+  const code = issueAuthorizationCode(
     client_id,
     user.id,
     redirect_uri,
@@ -329,4 +336,5 @@ router.post('/authorize/consent', express.urlencoded({ extended: true }), (req, 
   res.redirect(u.toString());
 });
 
+router.configure = configure;
 module.exports = router;

@@ -1,8 +1,14 @@
 const express = require('express');
 const { getJwks } = require('../jwt');
-const config = require('../config');
 
 const router = express.Router();
+
+let config;
+
+// Receive the shared config object from the entry point (issuer + endpoints).
+function configure(cfg) {
+  config = cfg;
+}
 
 router.get('/jwks.json', (req, res) => {
   res.json(getJwks());
@@ -30,4 +36,5 @@ router.get('/openid-configuration', (req, res) => {
   });
 });
 
+router.configure = configure;
 module.exports = router;

@@ -1,11 +1,20 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
-const config = require('./config');
 
 let db;
+let config;
+
+// Receive the shared config object from the entry point. Must be called before
+// initDatabase()/getDb() so the DB path comes from the single config source.
+function configure(cfg) {
+  config = cfg;
+}
 
 function initDatabase() {
+  if (!config) {
+    throw new Error('db.configure(config) must be called before initDatabase()');
+  }
   const dataDir = path.dirname(config.dbPath);
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
@@ -67,6 +76,14 @@ function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_tokens_value ON tokens(token_value);
     CREATE INDEX IF NOT EXISTS idx_auth_codes_code ON authorization_codes(code);
+
+    CREATE TABLE IF NOT EXISTS token_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_type TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_token_events_type ON token_events(event_type);
   `);
 
   try {
@@ -95,4 +112,4 @@ function getDb() {
   return db;
 }
 
-module.exports = { initDatabase, getDb };
+module.exports = { configure, initDatabase, getDb };

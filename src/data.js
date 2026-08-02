@@ -1,7 +1,13 @@
 const { getDb } = require('./db');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const config = require('./config');
+
+let config;
+
+// Receive the shared config object from the entry point.
+function configure(cfg) {
+  config = cfg;
+}
 
 function generateClientId() {
   return 'client_' + crypto.randomBytes(16).toString('hex');
@@ -157,7 +163,42 @@ function generateRefreshToken() {
   return 'refresh_' + crypto.randomBytes(32).toString('hex');
 }
 
+// The only token operation events we record. Each is stored with just an id,
+// the event type, and a timestamp — never a code, token, or key value.
+const TOKEN_EVENT_TYPES = {
+  AUTHORIZATION_CODE_CONSUMED: 'authorization_code_consumed',
+  REFRESH_TOKEN_ROTATED: 'refresh_token_rotated',
+  INVALID_TOKEN_REJECTED: 'invalid_token_rejected'
+};
+
+// Append a token operation event. Only the event type and time are persisted;
+// callers must never pass sensitive material here and the schema cannot store
+// any (the table has only id, event_type, created_at).
+function recordTokenEvent(eventType) {
+  const db = getDb();
+  const now = Math.floor(Date.now() / 1000);
+  const result = db.prepare(
+    'INSERT INTO token_events (event_type, created_at) VALUES (?, ?)'
+  ).run(eventType, now);
+  return { id: result.lastInsertRowid, event_type: eventType, created_at: now };
+}
+
+// Return token events, optionally filtered by event type, ordered by time
+// (oldest first, id as a stable tie-breaker).
+function getTokenEvents({ eventType } = {}) {
+  const db = getDb();
+  if (eventType) {
+    return db.prepare(
+      'SELECT id, event_type, created_at FROM token_events WHERE event_type = ? ORDER BY created_at ASC, id ASC'
+    ).all(eventType);
+  }
+  return db.prepare(
+    'SELECT id, event_type, created_at FROM token_events ORDER BY created_at ASC, id ASC'
+  ).all();
+}
+
 module.exports = {
+  configure,
   registerClient,
   getClientById,
   verifyClientCredentials,
@@ -173,5 +214,8 @@ module.exports = {
   revokeRefreshTokenFamily,
   isTokenRevoked,
   isTokenExpired,
-  generateRefreshToken
+  generateRefreshToken,
+  TOKEN_EVENT_TYPES,
+  recordTokenEvent,
+  getTokenEvents
 };
