@@ -2,7 +2,23 @@ const http = require('http');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
 
-const BASE_URL = process.env.BASE_URL || 'http://localhost:9383';
+let BASE_URL = process.env.BASE_URL || '';
+
+async function ensureServer() {
+  if (BASE_URL) {
+    return { close: async () => {} };
+  }
+
+  const { start } = require('./src/server');
+  const server = start({ port: 0, issuer: null });
+  await new Promise((resolve) => server.once('listening', resolve));
+  BASE_URL = server.config.issuer;
+  console.log(`Auto-started server at ${BASE_URL} (issuer derived from listening address)`);
+  console.log('');
+  return {
+    close: () => new Promise((resolve) => server.close(resolve))
+  };
+}
 
 function request(method, path, data, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -347,7 +363,14 @@ async function runTests() {
   console.log('所有核心测试全部通过！🎉');
 }
 
-runTests().catch(err => {
+(async () => {
+  const server = await ensureServer();
+  try {
+    await runTests();
+  } finally {
+    await server.close();
+  }
+})().catch(err => {
   console.error('Test failed:', err.message || err);
   process.exit(1);
 });

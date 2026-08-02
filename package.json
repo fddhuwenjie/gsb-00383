@@ -7,7 +7,11 @@
     "start": "node src/server.js",
     "dev": "node src/server.js",
     "generate-keys": "node scripts/generate-keys.js",
-    "init-db": "node scripts/init-db.js"
+    "init-db": "node scripts/init-db.js",
+    "test": "node --test test/config.test.js test/grantService.test.js test/tokenEvents.test.js test/integration/codeGrant.test.js test/integration/refreshGrant.test.js test/integration/adminEvents.test.js",
+    "test:unit": "node --test test/config.test.js test/grantService.test.js test/tokenEvents.test.js",
+    "test:integration": "node --test test/integration/codeGrant.test.js test/integration/refreshGrant.test.js test/integration/adminEvents.test.js",
+    "test:e2e": "node test-e2e.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
