@@ -2,17 +2,11 @@ const express = require('express');
 const {
   getClientById,
   verifyClientCredentials,
-  getAuthorizationCode,
-  markAuthorizationCodeUsed,
-  getUserById,
   storeToken,
-  getToken,
-  generateRefreshToken,
-  revokeToken
+  getToken
 } = require('../data');
+const { consumeAuthorizationCode, issueTokenPair, rotateRefreshToken } = require('../services/grantService');
 const { signAccessToken, verifyJwt } = require('../jwt');
-const { verifyCodeChallenge } = require('../pkce');
-const config = require('../config');
 
 const router = express.Router();
 
@@ -99,104 +93,24 @@ async function handleAuthorizationCodeGrant(req, res, client, code, redirect_uri
     });
   }
 
-  const authCode = getAuthorizationCode(code);
-  if (!authCode) {
-    return res.status(400).json({
-      error: 'invalid_grant',
-      error_description: 'Invalid authorization code'
-    });
-  }
-
-  if (authCode.used === 1) {
-    return res.status(400).json({
-      error: 'invalid_grant',
-      error_description: 'Authorization code has already been used'
-    });
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  if (authCode.expires_at < now) {
-    return res.status(400).json({
-      error: 'invalid_grant',
-      error_description: 'Authorization code has expired'
-    });
-  }
-
-  if (authCode.client_id !== client.client_id) {
-    return res.status(400).json({
-      error: 'invalid_grant',
-      error_description: 'Authorization code was not issued to this client'
-    });
-  }
-
-  if (authCode.redirect_uri !== redirect_uri) {
-    return res.status(400).json({
-      error: 'invalid_grant',
-      error_description: 'redirect_uri does not match'
-    });
-  }
-
-  if (authCode.code_challenge_method === 'S256') {
-    if (!verifyCodeChallenge(code_verifier, authCode.code_challenge)) {
-      return res.status(400).json({
-        error: 'invalid_grant',
-        error_description: 'PKCE verification failed'
-      });
-    }
-  } else {
-    return res.status(400).json({
-      error: 'invalid_grant',
-      error_description: 'Unsupported code challenge method'
-    });
-  }
-
-  markAuthorizationCodeUsed(authCode.id);
-
-  const user = getUserById(authCode.user_id);
-  if (!user) {
-    return res.status(400).json({
-      error: 'server_error',
-      error_description: 'User not found'
-    });
-  }
-
-  const codeScopes = authCode.scope ? authCode.scope.split(' ').filter(Boolean) : [];
-  const clientAllowedScopes = client.allowed_scopes || [];
-  const allAllowed = codeScopes.every(s => clientAllowedScopes.includes(s));
-  if (!allAllowed) {
-    return res.status(400).json({
-      error: 'invalid_scope',
-      error_description: `Scope exceeds client allowed_scopes. Allowed: ${clientAllowedScopes.join(' ')}`
-    });
-  }
-
-  const refreshTokenValue = generateRefreshToken();
-  const refreshExpiresAt = Math.floor(Date.now() / 1000) + config.refreshTokenTTL;
-
-  const accessTokenPayload = {
-    sub: user.sub,
-    scope: authCode.scope,
-    client_id: client.client_id,
-    username: user.username,
-    name: user.name,
-    email: user.email
-  };
-
-  const accessToken = await signAccessToken(accessTokenPayload);
-
-  storeToken('access_token', accessToken, client.client_id, user.id, authCode.scope,
-    Math.floor(Date.now() / 1000) + config.accessTokenTTL, refreshTokenValue);
-
-  storeToken('refresh_token', refreshTokenValue, client.client_id, user.id, authCode.scope,
-    refreshExpiresAt, null);
-
-  return res.json({
-    access_token: accessToken,
-    token_type: 'Bearer',
-    expires_in: config.accessTokenTTL,
-    refresh_token: refreshTokenValue,
-    scope: authCode.scope
+  const grantResult = consumeAuthorizationCode({
+    code,
+    redirectUri: redirect_uri,
+    codeVerifier: code_verifier,
+    client
   });
+  if (!grantResult.ok) {
+    return res.status(grantResult.status).json({
+      error: grantResult.error,
+      error_description: grantResult.error_description
+    });
+  }
+
+  const { authCode, user } = grantResult;
+
+  const tokens = await issueTokenPair({ client, user, scope: authCode.scope });
+
+  return res.json(tokens);
 }
 
 async function handleRefreshTokenGrant(req, res, client, refreshTokenValue, scope) {
@@ -207,105 +121,19 @@ async function handleRefreshTokenGrant(req, res, client, refreshTokenValue, scop
     });
   }
 
-  const oldRefreshToken = getToken(refreshTokenValue);
-  if (!oldRefreshToken || oldRefreshToken.token_type !== 'refresh_token') {
-    return res.status(400).json({
-      error: 'invalid_grant',
-      error_description: 'Invalid refresh token'
-    });
-  }
-
-  if (oldRefreshToken.revoked === 1) {
-    return res.status(400).json({
-      error: 'invalid_grant',
-      error_description: 'Refresh token has been revoked'
-    });
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  if (oldRefreshToken.expires_at && oldRefreshToken.expires_at < now) {
-    return res.status(400).json({
-      error: 'invalid_grant',
-      error_description: 'Refresh token has expired'
-    });
-  }
-
-  if (oldRefreshToken.client_id !== client.client_id) {
-    return res.status(400).json({
-      error: 'invalid_grant',
-      error_description: 'Refresh token was not issued to this client'
-    });
-  }
-
-  let newScope = oldRefreshToken.scope;
-  if (scope) {
-    const requestedScopes = scope.split(' ');
-    const originalScopes = oldRefreshToken.scope.split(' ');
-    const allInOriginal = requestedScopes.every(s => originalScopes.includes(s));
-    if (!allInOriginal) {
-      return res.status(400).json({
-        error: 'invalid_scope',
-        error_description: 'Requested scope exceeds original scope'
-      });
-    }
-    const clientAllowedScopes = client.allowed_scopes || [];
-    const allAllowedByClient = requestedScopes.every(s => clientAllowedScopes.includes(s));
-    if (!allAllowedByClient) {
-      return res.status(400).json({
-        error: 'invalid_scope',
-        error_description: `Requested scope exceeds client allowed_scopes. Allowed: ${clientAllowedScopes.join(' ')}`
-      });
-    }
-    newScope = scope;
-  } else {
-    const originalScopes = oldRefreshToken.scope ? oldRefreshToken.scope.split(' ').filter(Boolean) : [];
-    const clientAllowedScopes = client.allowed_scopes || [];
-    const allAllowedByClient = originalScopes.every(s => clientAllowedScopes.includes(s));
-    if (!allAllowedByClient) {
-      return res.status(400).json({
-        error: 'invalid_scope',
-        error_description: `Original token scope exceeds client allowed_scopes. Allowed: ${clientAllowedScopes.join(' ')}`
-      });
-    }
-  }
-
-  const user = getUserById(oldRefreshToken.user_id);
-  if (!user) {
-    return res.status(400).json({
-      error: 'server_error',
-      error_description: 'User not found'
-    });
-  }
-
-  const newRefreshTokenValue = generateRefreshToken();
-  const refreshExpiresAt = Math.floor(Date.now() / 1000) + config.refreshTokenTTL;
-
-  const accessTokenPayload = {
-    sub: user.sub,
-    scope: newScope,
-    client_id: client.client_id,
-    username: user.username,
-    name: user.name,
-    email: user.email
-  };
-
-  const newAccessToken = await signAccessToken(accessTokenPayload);
-
-  storeToken('access_token', newAccessToken, client.client_id, user.id, newScope,
-    Math.floor(Date.now() / 1000) + config.accessTokenTTL, newRefreshTokenValue);
-
-  storeToken('refresh_token', newRefreshTokenValue, client.client_id, user.id, newScope,
-    refreshExpiresAt, null);
-
-  revokeToken(refreshTokenValue);
-
-  return res.json({
-    access_token: newAccessToken,
-    token_type: 'Bearer',
-    expires_in: config.accessTokenTTL,
-    refresh_token: newRefreshTokenValue,
-    scope: newScope
+  const rotationResult = await rotateRefreshToken({
+    refreshToken: refreshTokenValue,
+    scope,
+    client
   });
+  if (!rotationResult.ok) {
+    return res.status(rotationResult.status).json({
+      error: rotationResult.error,
+      error_description: rotationResult.error_description
+    });
+  }
+
+  return res.json(rotationResult.tokens);
 }
 
 router.post('/token/downscope', express.urlencoded({ extended: true }), async (req, res) => {
@@ -416,7 +244,7 @@ router.post('/token/downscope', express.urlencoded({ extended: true }), async (r
   }
 
   const remainingSeconds = tokenRecord.expires_at - now;
-  const newExpiresIn = Math.min(remainingSeconds, config.accessTokenTTL);
+  const newExpiresIn = Math.min(remainingSeconds, req.app.locals.config.accessTokenTTL);
 
   const originalPayload = jwtResult.payload;
   const newPayload = {

@@ -1,7 +1,7 @@
 const express = require('express');
 const url = require('url');
-const { getClientById, verifyUserPassword, getUserByUsername, createAuthorizationCode } = require('../data');
-const config = require('../config');
+const { getClientById, verifyUserPassword, getUserByUsername } = require('../data');
+const { issueAuthorizationCode } = require('../services/grantService');
 
 const router = express.Router();
 
@@ -313,15 +313,14 @@ router.post('/authorize/consent', express.urlencoded({ extended: true }), (req, 
     return redirectWithError(redirect_uri, 'server_error', 'User not found', state, res);
   }
 
-  const code = createAuthorizationCode(
-    client_id,
-    user.id,
-    redirect_uri,
+  const code = issueAuthorizationCode({
+    clientId: client_id,
+    userId: user.id,
+    redirectUri: redirect_uri,
     scope,
-    code_challenge,
-    code_challenge_method,
-    config.authorizationCodeTTL
-  );
+    codeChallenge: code_challenge,
+    codeChallengeMethod: code_challenge_method
+  });
 
   const u = new URL(redirect_uri);
   u.searchParams.set('code', code);

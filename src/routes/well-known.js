@@ -1,6 +1,5 @@
 const express = require('express');
 const { getJwks } = require('../jwt');
-const config = require('../config');
 
 const router = express.Router();
 
@@ -9,7 +8,7 @@ router.get('/jwks.json', (req, res) => {
 });
 
 router.get('/openid-configuration', (req, res) => {
-  const issuer = config.issuer;
+  const issuer = req.app.locals.config.issuer;
   res.json({
     issuer,
     authorization_endpoint: `${issuer}/authorize`,

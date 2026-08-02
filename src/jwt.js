@@ -1,24 +1,23 @@
 const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 const jose = require('jose');
-const config = require('./config');
 
-let privateKey;
-let publicKey;
-let jwk;
+let jwtConfig = null;
+let jwk = null;
 
-function loadKeys() {
-  const privateKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'private.pem'), 'utf8');
-  const publicKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'public.pem'), 'utf8');
-
-  privateKey = crypto.createPrivateKey(privateKeyPem);
-  publicKey = crypto.createPublicKey(publicKeyPem);
+function initJwt(config) {
+  jwtConfig = {
+    privateKeyPath: config.privateKeyPath,
+    publicKeyPath: config.publicKeyPath,
+    issuer: config.issuer,
+    accessTokenTTL: config.accessTokenTTL
+  };
+  jwk = null;
 }
 
 function getJwks() {
   if (!jwk) {
-    const publicKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'public.pem'), 'utf8');
+    const publicKeyPem = fs.readFileSync(jwtConfig.publicKeyPath, 'utf8');
     const key = crypto.createPublicKey(publicKeyPem);
     const jwkObj = key.export({ format: 'jwk' });
     jwk = {
@@ -36,16 +35,16 @@ function getJwks() {
 }
 
 async function signAccessToken(payload, expiresInSeconds) {
-  const privateKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'private.pem'), 'utf8');
+  const privateKeyPem = fs.readFileSync(jwtConfig.privateKeyPath, 'utf8');
   const key = await jose.importPKCS8(privateKeyPem, 'RS256');
 
   const jti = 'jwt_' + crypto.randomBytes(16).toString('hex');
-  const ttl = expiresInSeconds || config.accessTokenTTL;
+  const ttl = expiresInSeconds || jwtConfig.accessTokenTTL;
 
   const jwt = await new jose.SignJWT({ ...payload, jti })
     .setProtectedHeader({ alg: 'RS256', kid: 'oauth21-key-1', typ: 'JWT' })
     .setIssuedAt()
-    .setIssuer(config.issuer)
+    .setIssuer(jwtConfig.issuer)
     .setExpirationTime(`${ttl}s`)
     .sign(key);
 
@@ -53,12 +52,12 @@ async function signAccessToken(payload, expiresInSeconds) {
 }
 
 async function verifyJwt(token) {
-  const publicKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'public.pem'), 'utf8');
+  const publicKeyPem = fs.readFileSync(jwtConfig.publicKeyPath, 'utf8');
   const key = await jose.importSPKI(publicKeyPem, 'RS256');
 
   try {
     const { payload, protectedHeader } = await jose.jwtVerify(token, key, {
-      issuer: config.issuer
+      issuer: jwtConfig.issuer
     });
     return { valid: true, payload, header: protectedHeader };
   } catch (err) {
@@ -66,4 +65,4 @@ async function verifyJwt(token) {
   }
 }
 
-module.exports = { signAccessToken, verifyJwt, getJwks };
+module.exports = { initJwt, signAccessToken, verifyJwt, getJwks };
