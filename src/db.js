@@ -1,17 +1,20 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
-const config = require('./config');
 
 let db;
+let dbPath;
 
-function initDatabase() {
-  const dataDir = path.dirname(config.dbPath);
+function initDatabase(config) {
+  if (config) {
+    dbPath = config.dbPath;
+  }
+  const dataDir = path.dirname(dbPath);
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
 
-  db = new Database(config.dbPath);
+  db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 
@@ -65,8 +68,15 @@ function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS token_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_type TEXT NOT NULL CHECK(event_type IN ('authorization_code_consumed', 'refresh_token_rotated', 'invalid_token_rejected')),
+      created_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tokens_value ON tokens(token_value);
     CREATE INDEX IF NOT EXISTS idx_auth_codes_code ON authorization_codes(code);
+    CREATE INDEX IF NOT EXISTS idx_token_events_type ON token_events(event_type);
   `);
 
   try {

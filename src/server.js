@@ -1,6 +1,9 @@
 const express = require('express');
+const { createConfig } = require('./config');
 const { initDatabase } = require('./db');
-const config = require('./config');
+const { initData } = require('./data');
+const { initJwt } = require('./jwt');
+const { initGrantService } = require('./services/grantService');
 
 const registerRoute = require('./routes/register');
 const authorizeRoute = require('./routes/authorize');
@@ -8,8 +11,16 @@ const tokenRoute = require('./routes/token');
 const introspectRoute = require('./routes/introspect');
 const userinfoRoute = require('./routes/userinfo');
 const wellKnownRoute = require('./routes/well-known');
+const tokenEventsRoute = require('./routes/token-events');
+
+const config = createConfig(process.env);
+initDatabase(config);
+initData(config);
+initJwt(config);
+initGrantService(config);
 
 const app = express();
+app.locals.config = config;
 
 app.use(express.json());
 
@@ -18,6 +29,7 @@ app.use(authorizeRoute);
 app.use(tokenRoute);
 app.use(introspectRoute);
 app.use(userinfoRoute);
+app.use(tokenEventsRoute);
 app.use('/.well-known', wellKnownRoute);
 
 app.get('/', (req, res) => {
@@ -44,14 +56,14 @@ app.use((err, req, res, next) => {
   });
 });
 
-initDatabase();
-
-app.listen(config.port, () => {
-  console.log(`OAuth 2.1 Authorization Server running on http://localhost:${config.port}`);
-  console.log(`Discovery: http://localhost:${config.port}/.well-known/openid-configuration`);
-  console.log(`JWKS: http://localhost:${config.port}/.well-known/jwks.json`);
-  console.log('');
-  console.log('Test user: alice / password123');
-});
+if (require.main === module) {
+  app.listen(config.port, () => {
+    console.log(`OAuth 2.1 Authorization Server running on http://localhost:${config.port}`);
+    console.log(`Discovery: http://localhost:${config.port}/.well-known/openid-configuration`);
+    console.log(`JWKS: http://localhost:${config.port}/.well-known/jwks.json`);
+    console.log('');
+    console.log('Test user: alice / password123');
+  });
+}
 
 module.exports = app;

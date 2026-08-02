@@ -1,6 +1,5 @@
 const express = require('express');
 const { registerClient } = require('../data');
-const config = require('../config');
 
 const router = express.Router();
 
@@ -39,7 +38,7 @@ router.post('/', (req, res) => {
         error_description: 'allowed_scopes must be an array of scope strings'
       });
     }
-    const systemScopes = config.defaultScopes;
+    const systemScopes = req.app.locals.config.defaultScopes;
     const allValid = allowed_scopes.every(s => systemScopes.includes(s));
     if (!allValid) {
       return res.status(400).json({

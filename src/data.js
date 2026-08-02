@@ -1,7 +1,12 @@
 const { getDb } = require('./db');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const config = require('./config');
+
+let defaultScopes = [];
+
+function initData(config) {
+  defaultScopes = config.defaultScopes;
+}
 
 function generateClientId() {
   return 'client_' + crypto.randomBytes(16).toString('hex');
@@ -18,7 +23,7 @@ function registerClient(clientName, clientType, redirectUris, grantTypes, allowe
   const now = Math.floor(Date.now() / 1000);
   const scopes = allowedScopes && Array.isArray(allowedScopes) && allowedScopes.length > 0
     ? allowedScopes
-    : config.defaultScopes;
+    : defaultScopes;
 
   const stmt = db.prepare(`
     INSERT INTO clients (client_id, client_secret, client_name, client_type, redirect_uris, grant_types, allowed_scopes, created_at)
@@ -57,7 +62,7 @@ function getClientById(clientId) {
     ...row,
     redirect_uris: JSON.parse(row.redirect_uris),
     grant_types: JSON.parse(row.grant_types),
-    allowed_scopes: row.allowed_scopes ? JSON.parse(row.allowed_scopes) : config.defaultScopes
+    allowed_scopes: row.allowed_scopes ? JSON.parse(row.allowed_scopes) : defaultScopes
   };
 }
 
@@ -157,7 +162,28 @@ function generateRefreshToken() {
   return 'refresh_' + crypto.randomBytes(32).toString('hex');
 }
 
+const TOKEN_EVENT_TYPES = ['authorization_code_consumed', 'refresh_token_rotated', 'invalid_token_rejected'];
+
+function recordTokenEvent(eventType) {
+  const db = getDb();
+  const now = Math.floor(Date.now() / 1000);
+  const result = db.prepare(`
+    INSERT INTO token_events (event_type, created_at)
+    VALUES (?, ?)
+  `).run(eventType, now);
+  return result.lastInsertRowid;
+}
+
+function getTokenEvents(eventType) {
+  const db = getDb();
+  if (eventType) {
+    return db.prepare('SELECT id, event_type, created_at FROM token_events WHERE event_type = ? ORDER BY created_at ASC, id ASC').all(eventType);
+  }
+  return db.prepare('SELECT id, event_type, created_at FROM token_events ORDER BY created_at ASC, id ASC').all();
+}
+
 module.exports = {
+  initData,
   registerClient,
   getClientById,
   verifyClientCredentials,
@@ -173,5 +199,8 @@ module.exports = {
   revokeRefreshTokenFamily,
   isTokenRevoked,
   isTokenExpired,
-  generateRefreshToken
+  generateRefreshToken,
+  TOKEN_EVENT_TYPES,
+  recordTokenEvent,
+  getTokenEvents
 };
