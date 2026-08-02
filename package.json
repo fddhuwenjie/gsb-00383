@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "test:e2e": "node test-e2e.js",
     "generate-keys": "node scripts/generate-keys.js",
     "init-db": "node scripts/init-db.js"
   },

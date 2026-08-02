@@ -1,8 +1,14 @@
 const express = require('express');
 const { registerClient } = require('../data');
-const config = require('../config');
 
 const router = express.Router();
+
+let config;
+
+// Receive the shared config object from the entry point (supported scopes).
+function configure(cfg) {
+  config = cfg;
+}
 
 router.post('/', (req, res) => {
   const { client_name, client_type, redirect_uris, grant_types, allowed_scopes } = req.body;
@@ -61,4 +67,5 @@ router.post('/', (req, res) => {
   }
 });
 
+router.configure = configure;
 module.exports = router;

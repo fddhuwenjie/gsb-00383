@@ -1,24 +1,21 @@
 const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 const jose = require('jose');
-const config = require('./config');
 
-let privateKey;
-let publicKey;
+let config;
 let jwk;
 
-function loadKeys() {
-  const privateKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'private.pem'), 'utf8');
-  const publicKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'public.pem'), 'utf8');
-
-  privateKey = crypto.createPrivateKey(privateKeyPem);
-  publicKey = crypto.createPublicKey(publicKeyPem);
+// Receive the shared config object from the entry point. Key paths and issuer
+// all come from config so nothing here hard-codes filesystem or issuer values.
+function configure(cfg) {
+  config = cfg;
+  // Reset cached JWKS in case keys/issuer changed between configurations.
+  jwk = undefined;
 }
 
 function getJwks() {
   if (!jwk) {
-    const publicKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'public.pem'), 'utf8');
+    const publicKeyPem = fs.readFileSync(config.publicKeyPath, 'utf8');
     const key = crypto.createPublicKey(publicKeyPem);
     const jwkObj = key.export({ format: 'jwk' });
     jwk = {
@@ -36,7 +33,7 @@ function getJwks() {
 }
 
 async function signAccessToken(payload, expiresInSeconds) {
-  const privateKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'private.pem'), 'utf8');
+  const privateKeyPem = fs.readFileSync(config.privateKeyPath, 'utf8');
   const key = await jose.importPKCS8(privateKeyPem, 'RS256');
 
   const jti = 'jwt_' + crypto.randomBytes(16).toString('hex');
@@ -53,7 +50,7 @@ async function signAccessToken(payload, expiresInSeconds) {
 }
 
 async function verifyJwt(token) {
-  const publicKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'public.pem'), 'utf8');
+  const publicKeyPem = fs.readFileSync(config.publicKeyPath, 'utf8');
   const key = await jose.importSPKI(publicKeyPem, 'RS256');
 
   try {
@@ -66,4 +63,4 @@ async function verifyJwt(token) {
   }
 }
 
-module.exports = { signAccessToken, verifyJwt, getJwks };
+module.exports = { configure, signAccessToken, verifyJwt, getJwks };
