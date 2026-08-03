@@ -1,12 +1,17 @@
 const http = require('http');
 const crypto = require('crypto');
-const { execSync } = require('child_process');
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
 
-const BASE_URL = process.env.BASE_URL || 'http://localhost:9383';
+const { startAsync, deriveIssuerFromAddress } = require('./src/server');
 
-function request(method, path, data, headers = {}) {
+let BASE_URL = process.env.BASE_URL || '';
+let ownServer = null;
+
+function request(method, reqPath, data, headers = {}) {
   return new Promise((resolve, reject) => {
-    const url = new URL(path, BASE_URL);
+    const url = new URL(reqPath, BASE_URL);
     const options = {
       hostname: url.hostname,
       port: url.port,
@@ -347,7 +352,33 @@ async function runTests() {
   console.log('所有核心测试全部通过！🎉');
 }
 
-runTests().catch(err => {
+async function main() {
+  if (!BASE_URL) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oauth-e2e-'));
+    const dbPath = path.join(tmpDir, 'e2e.db');
+    ownServer = await startAsync({
+      port: 0,
+      host: '127.0.0.1',
+      dbPath,
+      issuer: null
+    });
+    const address = ownServer.address();
+    BASE_URL = deriveIssuerFromAddress(address);
+    console.log(`[e2e] Launched ephemeral server at ${BASE_URL}`);
+    console.log('');
+  }
+
+  try {
+    await runTests();
+  } finally {
+    if (ownServer) {
+      await new Promise((resolve) => ownServer.close(resolve));
+    }
+  }
+}
+
+main().catch(err => {
   console.error('Test failed:', err.message || err);
+  if (ownServer) ownServer.close();
   process.exit(1);
 });
