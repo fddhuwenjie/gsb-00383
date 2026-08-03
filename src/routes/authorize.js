@@ -1,11 +1,15 @@
 const express = require('express');
-const url = require('url');
-const { getClientById, verifyUserPassword, getUserByUsername, createAuthorizationCode } = require('../data');
-const config = require('../config');
 
-const router = express.Router();
+function createAuthorizeRouter({
+  config,
+  getClientById,
+  verifyUserPassword,
+  getUserByUsername,
+  createAuthorizationCode
+}) {
+  const router = express.Router();
 
-const loginFormHtml = (client, redirectUri, scope, state, codeChallenge, codeChallengeMethod, errorMsg) => `
+  const loginFormHtml = (client, redirectUri, scope, state, codeChallenge, codeChallengeMethod, errorMsg) => `
 <!DOCTYPE html>
 <html>
 <head>
@@ -36,13 +40,13 @@ const loginFormHtml = (client, redirectUri, scope, state, codeChallenge, codeCha
       <input type="hidden" name="state" value="${state || ''}">
       <input type="hidden" name="code_challenge" value="${codeChallenge}">
       <input type="hidden" name="code_challenge_method" value="${codeChallengeMethod}">
-      
+
       <label>Username</label>
       <input type="text" name="username" required autofocus>
-      
+
       <label>Password</label>
       <input type="password" name="password" required>
-      
+
       <button type="submit">Sign In</button>
     </form>
   </div>
@@ -50,7 +54,7 @@ const loginFormHtml = (client, redirectUri, scope, state, codeChallenge, codeCha
 </html>
 `;
 
-const consentHtml = (client, redirectUri, scope, state, codeChallenge, codeChallengeMethod, user) => `
+  const consentHtml = (client, redirectUri, scope, state, codeChallenge, codeChallengeMethod, user) => `
 <!DOCTYPE html>
 <html>
 <head>
@@ -100,233 +104,237 @@ const consentHtml = (client, redirectUri, scope, state, codeChallenge, codeChall
 </html>
 `;
 
-function redirectWithError(redirectUri, error, description, state, res) {
-  const u = new URL(redirectUri);
-  u.searchParams.set('error', error);
-  if (description) u.searchParams.set('error_description', description);
-  if (state) u.searchParams.set('state', state);
-  return res.redirect(u.toString());
-}
-
-router.get('/authorize', (req, res) => {
-  const {
-    response_type,
-    client_id,
-    redirect_uri,
-    scope,
-    state,
-    code_challenge,
-    code_challenge_method
-  } = req.query;
-
-  if (response_type !== 'code') {
-    return res.status(400).json({
-      error: 'unsupported_response_type',
-      error_description: 'Only "code" response type is supported (OAuth 2.1)'
-    });
+  function redirectWithError(redirectUri, error, description, state, res) {
+    const u = new URL(redirectUri);
+    u.searchParams.set('error', error);
+    if (description) u.searchParams.set('error_description', description);
+    if (state) u.searchParams.set('state', state);
+    return res.redirect(u.toString());
   }
 
-  if (!client_id) {
-    return res.status(400).json({
-      error: 'invalid_request',
-      error_description: 'client_id is required'
-    });
-  }
-
-  const client = getClientById(client_id);
-  if (!client) {
-    return res.status(400).json({
-      error: 'invalid_client',
-      error_description: 'Unknown client_id'
-    });
-  }
-
-  if (!redirect_uri) {
-    return res.status(400).json({
-      error: 'invalid_request',
-      error_description: 'redirect_uri is required'
-    });
-  }
-
-  if (!client.redirect_uris.includes(redirect_uri)) {
-    return res.status(400).json({
-      error: 'invalid_redirect_uri',
-      error_description: 'Redirect URI does not match any registered URI'
-    });
-  }
-
-  const scopeStr = scope || 'openid profile';
-  const requestedScopes = scopeStr.split(' ').filter(Boolean);
-  const allowedScopes = client.allowed_scopes || [];
-  const allAllowed = requestedScopes.every(s => allowedScopes.includes(s));
-  if (!allAllowed) {
-    return redirectWithError(
+  router.get('/authorize', (req, res) => {
+    const {
+      response_type,
+      client_id,
       redirect_uri,
-      'invalid_scope',
-      `Requested scope exceeds client allowed_scopes. Allowed: ${allowedScopes.join(' ')}`,
+      scope,
       state,
-      res
-    );
-  }
+      code_challenge,
+      code_challenge_method
+    } = req.query;
 
-  if (!code_challenge) {
-    return redirectWithError(
+    if (response_type !== 'code') {
+      return res.status(400).json({
+        error: 'unsupported_response_type',
+        error_description: 'Only "code" response type is supported (OAuth 2.1)'
+      });
+    }
+
+    if (!client_id) {
+      return res.status(400).json({
+        error: 'invalid_request',
+        error_description: 'client_id is required'
+      });
+    }
+
+    const client = getClientById(client_id);
+    if (!client) {
+      return res.status(400).json({
+        error: 'invalid_client',
+        error_description: 'Unknown client_id'
+      });
+    }
+
+    if (!redirect_uri) {
+      return res.status(400).json({
+        error: 'invalid_request',
+        error_description: 'redirect_uri is required'
+      });
+    }
+
+    if (!client.redirect_uris.includes(redirect_uri)) {
+      return res.status(400).json({
+        error: 'invalid_redirect_uri',
+        error_description: 'Redirect URI does not match any registered URI'
+      });
+    }
+
+    const scopeStr = scope || 'openid profile';
+    const requestedScopes = scopeStr.split(' ').filter(Boolean);
+    const allowedScopes = client.allowed_scopes || [];
+    const allAllowed = requestedScopes.every(s => allowedScopes.includes(s));
+    if (!allAllowed) {
+      return redirectWithError(
+        redirect_uri,
+        'invalid_scope',
+        `Requested scope exceeds client allowed_scopes. Allowed: ${allowedScopes.join(' ')}`,
+        state,
+        res
+      );
+    }
+
+    if (!code_challenge) {
+      return redirectWithError(
+        redirect_uri,
+        'invalid_request',
+        'PKCE code_challenge is required (S256 only)',
+        state,
+        res
+      );
+    }
+
+    if (code_challenge_method && code_challenge_method !== 'S256') {
+      return redirectWithError(
+        redirect_uri,
+        'invalid_request',
+        'Only S256 code challenge method is supported',
+        state,
+        res
+      );
+    }
+
+    const actualMethod = code_challenge_method || 'S256';
+    if (actualMethod !== 'S256') {
+      return redirectWithError(
+        redirect_uri,
+        'invalid_request',
+        'Only S256 code challenge method is supported',
+        state,
+        res
+      );
+    }
+
+    res.send(loginFormHtml(
+      client,
       redirect_uri,
-      'invalid_request',
-      'PKCE code_challenge is required (S256 only)',
+      scopeStr,
       state,
-      res
-    );
-  }
+      code_challenge,
+      actualMethod,
+      null
+    ));
+  });
 
-  if (code_challenge_method && code_challenge_method !== 'S256') {
-    return redirectWithError(
+  router.post('/authorize', express.urlencoded({ extended: true }), (req, res) => {
+    const {
+      client_id,
       redirect_uri,
-      'invalid_request',
-      'Only S256 code challenge method is supported',
+      scope,
       state,
-      res
-    );
-  }
+      code_challenge,
+      code_challenge_method,
+      username,
+      password
+    } = req.body;
 
-  const actualMethod = code_challenge_method || 'S256';
-  if (actualMethod !== 'S256') {
-    return redirectWithError(
-      redirect_uri,
-      'invalid_request',
-      'Only S256 code challenge method is supported',
-      state,
-      res
-    );
-  }
+    const client = getClientById(client_id);
+    if (!client) {
+      return res.status(400).send('Invalid client');
+    }
 
-  res.send(loginFormHtml(
-    client,
-    redirect_uri,
-    scopeStr,
-    state,
-    code_challenge,
-    actualMethod,
-    null
-  ));
-});
+    if (!client.redirect_uris.includes(redirect_uri)) {
+      return res.status(400).send('Invalid redirect_uri');
+    }
 
-router.post('/authorize', express.urlencoded({ extended: true }), (req, res) => {
-  const {
-    client_id,
-    redirect_uri,
-    scope,
-    state,
-    code_challenge,
-    code_challenge_method,
-    username,
-    password
-  } = req.body;
+    const requestedScopes = scope ? scope.split(' ').filter(Boolean) : [];
+    const allowedScopes = client.allowed_scopes || [];
+    const allAllowed = requestedScopes.every(s => allowedScopes.includes(s));
+    if (!allAllowed) {
+      return redirectWithError(
+        redirect_uri,
+        'invalid_scope',
+        `Requested scope exceeds client allowed_scopes. Allowed: ${allowedScopes.join(' ')}`,
+        state,
+        res
+      );
+    }
 
-  const client = getClientById(client_id);
-  if (!client) {
-    return res.status(400).send('Invalid client');
-  }
+    const valid = verifyUserPassword(username, password);
+    if (!valid) {
+      return res.send(loginFormHtml(
+        client,
+        redirect_uri,
+        scope,
+        state,
+        code_challenge,
+        code_challenge_method,
+        'Invalid username or password'
+      ));
+    }
 
-  if (!client.redirect_uris.includes(redirect_uri)) {
-    return res.status(400).send('Invalid redirect_uri');
-  }
-
-  const requestedScopes = scope ? scope.split(' ').filter(Boolean) : [];
-  const allowedScopes = client.allowed_scopes || [];
-  const allAllowed = requestedScopes.every(s => allowedScopes.includes(s));
-  if (!allAllowed) {
-    return redirectWithError(
-      redirect_uri,
-      'invalid_scope',
-      `Requested scope exceeds client allowed_scopes. Allowed: ${allowedScopes.join(' ')}`,
-      state,
-      res
-    );
-  }
-
-  const valid = verifyUserPassword(username, password);
-  if (!valid) {
-    return res.send(loginFormHtml(
+    const user = getUserByUsername(username);
+    res.send(consentHtml(
       client,
       redirect_uri,
       scope,
       state,
       code_challenge,
       code_challenge_method,
-      'Invalid username or password'
+      user
     ));
-  }
+  });
 
-  const user = getUserByUsername(username);
-  res.send(consentHtml(
-    client,
-    redirect_uri,
-    scope,
-    state,
-    code_challenge,
-    code_challenge_method,
-    user
-  ));
-});
-
-router.post('/authorize/consent', express.urlencoded({ extended: true }), (req, res) => {
-  const {
-    client_id,
-    redirect_uri,
-    scope,
-    state,
-    code_challenge,
-    code_challenge_method,
-    action,
-    username
-  } = req.body;
-
-  const client = getClientById(client_id);
-  if (!client) {
-    return res.status(400).send('Invalid client');
-  }
-
-  if (!client.redirect_uris.includes(redirect_uri)) {
-    return res.status(400).send('Invalid redirect_uri');
-  }
-
-  const requestedScopes = scope ? scope.split(' ').filter(Boolean) : [];
-  const allowedScopes = client.allowed_scopes || [];
-  const allAllowed = requestedScopes.every(s => allowedScopes.includes(s));
-  if (!allAllowed) {
-    return redirectWithError(
+  router.post('/authorize/consent', express.urlencoded({ extended: true }), (req, res) => {
+    const {
+      client_id,
       redirect_uri,
-      'invalid_scope',
-      `Requested scope exceeds client allowed_scopes. Allowed: ${allowedScopes.join(' ')}`,
+      scope,
       state,
-      res
-    );
-  }
+      code_challenge,
+      code_challenge_method,
+      action,
+      username
+    } = req.body;
 
-  if (action === 'deny') {
-    return redirectWithError(redirect_uri, 'access_denied', 'User denied access', state, res);
-  }
+    const client = getClientById(client_id);
+    if (!client) {
+      return res.status(400).send('Invalid client');
+    }
 
-  const user = getUserByUsername(username);
-  if (!user) {
-    return redirectWithError(redirect_uri, 'server_error', 'User not found', state, res);
-  }
+    if (!client.redirect_uris.includes(redirect_uri)) {
+      return res.status(400).send('Invalid redirect_uri');
+    }
 
-  const code = createAuthorizationCode(
-    client_id,
-    user.id,
-    redirect_uri,
-    scope,
-    code_challenge,
-    code_challenge_method,
-    config.authorizationCodeTTL
-  );
+    const requestedScopes = scope ? scope.split(' ').filter(Boolean) : [];
+    const allowedScopes = client.allowed_scopes || [];
+    const allAllowed = requestedScopes.every(s => allowedScopes.includes(s));
+    if (!allAllowed) {
+      return redirectWithError(
+        redirect_uri,
+        'invalid_scope',
+        `Requested scope exceeds client allowed_scopes. Allowed: ${allowedScopes.join(' ')}`,
+        state,
+        res
+      );
+    }
 
-  const u = new URL(redirect_uri);
-  u.searchParams.set('code', code);
-  if (state) u.searchParams.set('state', state);
-  res.redirect(u.toString());
-});
+    if (action === 'deny') {
+      return redirectWithError(redirect_uri, 'access_denied', 'User denied access', state, res);
+    }
 
-module.exports = router;
+    const user = getUserByUsername(username);
+    if (!user) {
+      return redirectWithError(redirect_uri, 'server_error', 'User not found', state, res);
+    }
+
+    const grant = createAuthorizationCode({
+      clientId: client_id,
+      userId: user.id,
+      redirectUri: redirect_uri,
+      scope,
+      codeChallenge: code_challenge,
+      codeChallengeMethod: code_challenge_method,
+      ttl: config.authorizationCodeTTL
+    });
+    const code = grant.code;
+
+    const u = new URL(redirect_uri);
+    u.searchParams.set('code', code);
+    if (state) u.searchParams.set('state', state);
+    res.redirect(u.toString());
+  });
+
+  return router;
+}
+
+module.exports = createAuthorizeRouter;

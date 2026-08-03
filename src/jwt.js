@@ -1,69 +1,80 @@
 const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 const jose = require('jose');
-const config = require('./config');
 
-let privateKey;
-let publicKey;
-let jwk;
+function createJwtService(config) {
+  const cfg = config;
 
-function loadKeys() {
-  const privateKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'private.pem'), 'utf8');
-  const publicKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'public.pem'), 'utf8');
+  let privateKey;
+  let publicKey;
+  let jwk;
 
-  privateKey = crypto.createPrivateKey(privateKeyPem);
-  publicKey = crypto.createPublicKey(publicKeyPem);
-}
+  function readPrivateKey() {
+    if (privateKey) return privateKey;
+    const pem = fs.readFileSync(cfg.privateKeyPath, 'utf8');
+    privateKey = crypto.createPrivateKey(pem);
+    return privateKey;
+  }
 
-function getJwks() {
-  if (!jwk) {
-    const publicKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'public.pem'), 'utf8');
-    const key = crypto.createPublicKey(publicKeyPem);
+  function readPublicKey() {
+    if (publicKey) return publicKey;
+    const pem = fs.readFileSync(cfg.publicKeyPath, 'utf8');
+    publicKey = crypto.createPublicKey(pem);
+    return publicKey;
+  }
+
+  function getJwks() {
+    if (jwk) return jwk;
+    const key = readPublicKey();
     const jwkObj = key.export({ format: 'jwk' });
     jwk = {
       keys: [{
         kty: jwkObj.kty,
         n: jwkObj.n,
         e: jwkObj.e,
-        kid: 'oauth21-key-1',
+        kid: cfg.keyId,
         alg: 'RS256',
         use: 'sig'
       }]
     };
+    return jwk;
   }
-  return jwk;
-}
 
-async function signAccessToken(payload, expiresInSeconds) {
-  const privateKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'private.pem'), 'utf8');
-  const key = await jose.importPKCS8(privateKeyPem, 'RS256');
+  async function signAccessToken(payload, expiresInSeconds) {
+    const pem = fs.readFileSync(cfg.privateKeyPath, 'utf8');
+    const key = await jose.importPKCS8(pem, 'RS256');
 
-  const jti = 'jwt_' + crypto.randomBytes(16).toString('hex');
-  const ttl = expiresInSeconds || config.accessTokenTTL;
+    if (!cfg.issuer) {
+      throw new Error('Cannot sign access token: issuer is not configured');
+    }
 
-  const jwt = await new jose.SignJWT({ ...payload, jti })
-    .setProtectedHeader({ alg: 'RS256', kid: 'oauth21-key-1', typ: 'JWT' })
-    .setIssuedAt()
-    .setIssuer(config.issuer)
-    .setExpirationTime(`${ttl}s`)
-    .sign(key);
+    const jti = 'jwt_' + crypto.randomBytes(16).toString('hex');
+    const ttl = expiresInSeconds || cfg.accessTokenTTL;
 
-  return jwt;
-}
-
-async function verifyJwt(token) {
-  const publicKeyPem = fs.readFileSync(path.join(__dirname, '..', 'keys', 'public.pem'), 'utf8');
-  const key = await jose.importSPKI(publicKeyPem, 'RS256');
-
-  try {
-    const { payload, protectedHeader } = await jose.jwtVerify(token, key, {
-      issuer: config.issuer
-    });
-    return { valid: true, payload, header: protectedHeader };
-  } catch (err) {
-    return { valid: false, error: err.message };
+    return new jose.SignJWT({ ...payload, jti })
+      .setProtectedHeader({ alg: 'RS256', kid: cfg.keyId, typ: 'JWT' })
+      .setIssuedAt()
+      .setIssuer(cfg.issuer)
+      .setExpirationTime(`${ttl}s`)
+      .sign(key);
   }
+
+  async function verifyJwt(token, options = {}) {
+    const issuer = options.issuer || cfg.issuer;
+    const pem = fs.readFileSync(cfg.publicKeyPath, 'utf8');
+    const key = await jose.importSPKI(pem, 'RS256');
+
+    try {
+      const verifyOptions = {};
+      if (issuer) verifyOptions.issuer = issuer;
+      const { payload, protectedHeader } = await jose.jwtVerify(token, key, verifyOptions);
+      return { valid: true, payload, header: protectedHeader };
+    } catch (err) {
+      return { valid: false, error: err.message };
+    }
+  }
+
+  return { signAccessToken, verifyJwt, getJwks };
 }
 
-module.exports = { signAccessToken, verifyJwt, getJwks };
+module.exports = { createJwtService };
